@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>UX Score Cards</title>
+<style>
+*{box-sizing:border-box}
+html,body{margin:0;width:100%;overflow:hidden;background:transparent;font-family:-apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif}
+.stage{position:relative;width:100%;height:200px;overflow:hidden;isolation:isolate;-webkit-mask-image:linear-gradient(to top,transparent 0px,#000 80px);mask-image:linear-gradient(to top,transparent 0px,#000 80px)}
+.ux-track{display:flex;align-items:center;gap:10px;width:max-content;height:100%;will-change:transform}
+.card{position:relative;flex:0 0 230px;width:230px;height:142px;padding:20px 20px 16px;border:1px solid rgba(255,255,255,.72);border-radius:20px;background:linear-gradient(135deg,rgba(255,255,255,.82),rgba(255,255,255,.28));box-shadow:0 5px 5px rgba(74,91,112,.16),inset 0 1px rgba(255,255,255,.9);backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);transform-origin:center bottom;transform:translateX(var(--push,0px)) scale(var(--scale,1));transition:transform .7s cubic-bezier(.22,1,.36,1);outline-offset:2px}
+.card{transform-origin:left bottom;transform:scale(var(--scale,1));transition:none;margin-right:var(--width-correction,0px)}
+.card.active{z-index:2}
+.label{color:#7e8790;font-size:12px;letter-spacing:.08em;white-space:nowrap}
+.score{margin-top:9px;font-size:40px;line-height:1;font-weight:800;color:var(--color);font-variant-numeric:tabular-nums}
+@supports ((background-clip:text) or (-webkit-background-clip:text)) {
+  .score{width:max-content;background:linear-gradient(90deg,var(--start),var(--end));-webkit-background-clip:text;background-clip:text;color:transparent;-webkit-text-fill-color:transparent}
+}
+.bar{height:8px;margin-top:20px;border-radius:99px;background:rgba(88,102,116,.14);overflow:hidden}
+.bar i{display:block;height:100%;width:var(--score);transform-origin:left;transform:scaleX(0);border-radius:inherit;background:linear-gradient(90deg,var(--start),var(--end))}
+</style>
+</head>
+<body>
+<main class="stage" aria-label="UX 评分展示"><div class="ux-track"></div></main>
+<script>
+(() => {
+  const stage = document.querySelector('.stage');
+  const track = document.querySelector('.ux-track');
+  const items = [
+    {label:'可用性 USABILITY',score:66},
+    {label:'信息架构 IA',score:74},
+    {label:'视觉层级 HIERARCHY',score:86},
+    {label:'交互反馈 FEEDBACK',score:95},
+    {label:'内容清晰 CLARITY',score:82}
+  ];
+  const palettes = [
+    ['#d9363e','#ff7875','#c41d3b'],
+    ['#e87818','#ffb454','#e76516'],
+    ['#2b9b68','#95de64','#20a56a'],
+    ['#3c73d9','#85a5ff','#3565d4']
+  ];
+  const step = 240;
+  const duration = 1500;
+  let cards = [];
+  let offset = 0;
+  let previousTime = null;
+  let hovered = false;
+  let focused = false;
+  let selectedCard = null;
+
+  function play(card, now) {
+    card.startedAt = now;
+    card.number.textContent = '00';
+    card.fill.style.transform = 'scaleX(0)';
+  }
+
+  function select(card) {
+    selectedCard = card;
+    cards.forEach(neighbor => {
+      neighbor.element.classList.toggle('active', neighbor === card);
+    });
+    play(card, performance.now());
+  }
+
+  function clearSelection() {
+    selectedCard = null;
+    cards.forEach(card => {
+      card.element.classList.remove('active');
+    });
+  }
+
+  function addCard(index) {
+    const item = items[index % items.length];
+    const palette = palettes[Math.min(3, Math.max(0, Math.floor((item.score - 60) / 10)))];
+    const element = document.createElement('article');
+    element.className = 'card';
+    element.tabIndex = 0;
+    element.setAttribute('aria-label', item.label + '，' + item.score + '分');
+    element.style.setProperty('--score', item.score + '%');
+    element.style.setProperty('--color', palette[0]);
+    element.style.setProperty('--start', palette[1]);
+    element.style.setProperty('--end', palette[2]);
+    element.innerHTML = '<div class="label"></div><div class="score" aria-hidden="true"></div><div class="bar"><i></i></div>';
+    element.querySelector('.label').textContent = item.label;
+    const card = {element, number:element.querySelector('.score'), fill:element.querySelector('i'), target:item.score, entered:false, startedAt:null};
+    card.scale = 1;
+    card.left = index * step - offset;
+    card.initialized = false;
+    card.number.textContent = String(item.score).padStart(2, '0');
+    card.fill.style.transform = 'scaleX(1)';
+    card.entered = index * step - offset <= stage.clientWidth - 50;
+    element.addEventListener('mouseenter', () => select(card));
+    element.addEventListener('mouseleave', clearSelection);
+    element.addEventListener('focus', () => { focused = true; select(card); });
+    element.addEventListener('blur', () => { focused = false; clearSelection(); });
+    cards.push(card);
+    track.append(element);
+  }
+
+  function ensureCards() {
+    const count = Math.max(10, Math.ceil(stage.clientWidth / 125) + 3);
+    while (cards.length < count) addCard(cards.length);
+  }
+
+  stage.addEventListener('mouseenter', () => { hovered = true; });
+  stage.addEventListener('mouseleave', () => { hovered = false; clearSelection(); });
+  new ResizeObserver(ensureCards).observe(stage);
+  ensureCards();
+
+  function frame(now) {
+    const elapsed = previousTime === null ? 0 : Math.min(now - previousTime, 50);
+    previousTime = now;
+    if (!hovered && !focused) offset += elapsed * .05;
+    while (offset >= cards[0].scale * 230 + 10) {
+      offset -= cards[0].scale * 230 + 10;
+      const recycled = cards.shift();
+      recycled.entered = false;
+      recycled.startedAt = null;
+      recycled.number.textContent = String(recycled.target).padStart(2, '0');
+      recycled.fill.style.transform = 'scaleX(1)';
+      cards.push(recycled);
+      track.append(recycled.element);
+    }
+    track.style.transform = 'translate3d(' + (-offset) + 'px,0,0)';
+    const viewportWidth = stage.clientWidth;
+    const center = selectedCard ? selectedCard.left + selectedCard.scale * 115 : viewportWidth / 2;
+    let left = -offset;
+    cards.forEach(card => {
+      const cardCenter = left + card.scale * 115;
+      const span = cardCenter < center ? center : viewportWidth - center;
+      const distance = Math.min(1, Math.abs(cardCenter - center) / Math.max(span, 1));
+      const targetScale = card === selectedCard ? 1 : 1 - distance * .5;
+      card.scale = card.initialized ? card.scale + (targetScale - card.scale) * (1 - Math.exp(-elapsed / 140)) : targetScale;
+      card.left = left;
+      card.element.style.setProperty('--scale', card.scale);
+      card.element.style.setProperty('--width-correction', (card.scale - 1) * 230 + 'px');
+      const enterLine = viewportWidth - 50;
+      if (!card.initialized) {
+        card.entered = left <= enterLine;
+        card.initialized = true;
+      }
+      if (!card.entered && left <= enterLine && left + card.scale * 230 > enterLine) {
+        card.entered = true;
+        play(card, now);
+      }
+      left += card.scale * 230 + 10;
+      if (card.startedAt === null) return;
+      const progress = Math.min(1, Math.max(0, (now - card.startedAt) / duration));
+      const eased = 1 - Math.pow(1 - progress, 3);
+      card.number.textContent = String(Math.round(card.target * eased)).padStart(2, '0');
+      card.fill.style.transform = 'scaleX(' + eased + ')';
+      if (progress === 1) card.startedAt = null;
+    });
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
